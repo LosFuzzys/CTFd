@@ -1,8 +1,9 @@
 ![](https://github.com/CTFd/CTFd/blob/master/CTFd/themes/core/static/img/logo.png?raw=true)
 ====
 
-[![Build Status](https://travis-ci.org/LosFuzzys/CTFd.svg?branch=losctf)](https://travis-ci.org/CTFd/CTFd)
-[![CTFd Slack](https://slack.ctfd.io/badge.svg)](https://slack.ctfd.io/)
+[![Build Status](https://travis-ci.org/LosFuzzys/CTFd.svg?branch=losctf)](https://travis-ci.org/LosFuzzys/CTFd)
+
+# LosFuzzys' CTFd Fork
 
 ## What is CTFd?
 CTFd is a Capture The Flag framework focusing on ease of use and customizability. It comes with everything you need to run a CTF and it's easy to customize with plugins and themes.
