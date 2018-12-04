@@ -105,6 +105,8 @@ class ChallengeList(Resource):
                 'script': challenge_type.scripts['view'],
             })
 
+        response = sorted(response, key=itemgetter('category', 'value','name'))
+
         db.session.close()
         return {
             'success': True,
