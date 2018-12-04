@@ -14,6 +14,46 @@ def challenges_listing():
     challenges = Challenges.query.all()
     return render_template('admin/challenges/challenges.html', challenges=challenges)
 
+@admin.route('/admin/chals', methods=['GET'])
+@admins_only
+def admin_chals():
+    chals = Challenges.query.order_by(Challenges.value).all()
+
+    json_data = {'game': []}
+    for chal in chals:
+        tags = [tag.tag for tag in Tags.query.add_columns('tag').filter_by(chal=chal.id).all()]
+        files = [str(f.location) for f in Files.query.filter_by(chal=chal.id).all()]
+        hints = []
+        for hint in Hints.query.filter_by(chal=chal.id).all():
+            hints.append({'id': hint.id, 'cost': hint.cost, 'hint': hint.hint})
+
+        type_class = CHALLENGE_CLASSES.get(chal.type)
+        type_name = type_class.name if type_class else None
+
+        json_data['game'].append({
+            'id': chal.id,
+            'name': chal.name,
+            'value': chal.value,
+            'description': chal.description,
+            'category': chal.category,
+            'files': files,
+            'tags': tags,
+            'hints': hints,
+            'hidden': chal.hidden,
+            'max_attempts': chal.max_attempts,
+            'type': chal.type,
+            'type_name': type_name,
+            'type_data': {
+                'id': type_class.id,
+                'name': type_class.name,
+                'templates': type_class.templates,
+                'scripts': type_class.scripts,
+            }
+        })
+
+    db.session.close()
+    return jsonify(json_data)
+
 
 @admin.route('/admin/challenges/<int:challenge_id>')
 @admins_only
