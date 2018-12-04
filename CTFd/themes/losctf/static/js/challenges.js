@@ -240,10 +240,10 @@ function loadchals(cb) {
 
                 var categoryid = category.replace(/ /g, "-").hashCode();
                 var categoryrow = $('' +
-                    '<div id="{0}-row" class="pt-5">'.format(categoryid) +
-                    '<div class="category-header col-md-12 mb-3">' +
+                    '<div id="{0}-row {1}-row" class="pt-5">'.format(categoryid, category) +
+                    '<div class="category-header {0}-header col-md-12 mb-3">'.format(category) +
                     '</div>' +
-                    '<div class="category-challenges col-md-12">' +
+                    '<div class="category-challenges {0}-challenges col-md-12">'.format(category) +
                     '<div class="challenges-row col-md-12"></div>' +
                     '</div>' +
                     '</div>');
