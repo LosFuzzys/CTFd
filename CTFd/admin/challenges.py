@@ -2,6 +2,7 @@ from flask import current_app as app, render_template, render_template_string, u
 from CTFd.utils.decorators import admins_only
 from CTFd.utils import binary_type
 from CTFd.models import Solves, Challenges, Flags
+from CTFd.models import db, Teams, Awards, WrongKeys, Tags, Files, Tracking, Pages, Config, Hints, Unlocks, DatabaseError
 from CTFd.plugins.challenges import get_chal_class
 from CTFd.admin import admin
 import os
