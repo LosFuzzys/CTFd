@@ -41,6 +41,7 @@ from CTFd.plugins.challenges import get_chal_class
 from CTFd.utils.dates import ctf_started, ctf_ended, ctf_paused, ctftime
 from CTFd.utils.logging import log
 from sqlalchemy.sql import or_, and_, any_
+from operator import itemgetter
 
 challenges_namespace = Namespace('challenges',
                                  description="Endpoint to retrieve Challenges")
