@@ -1,6 +1,7 @@
 from flask import current_app as app, render_template, request, redirect, abort, url_for, session, Blueprint, Response, send_file
 from flask.helpers import safe_join
 
+from CTFd.utils.decorators.visibility import check_challenge_visibility
 from CTFd.models import db, Admins, Files, Pages, Notifications
 from CTFd.utils import markdown
 from CTFd.cache import cache
@@ -192,8 +193,6 @@ def files(path):
         if current_user.is_admin() is False:
             if not ctftime():
                 abort(403)
-        else:
-            abort(403)
 
     uploader = get_uploader()
     try:
