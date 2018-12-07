@@ -184,7 +184,7 @@ def test_user_can_access_files():
             with app.test_client() as client:
                 r = client.get(url)
 
-                assert r.status_code == 403
+                assert r.status_code == 403 or r.status_code == 302
                 assert r.get_data(as_text=True) != 'testing file load'
 
             # Authed user should be able to see the files
