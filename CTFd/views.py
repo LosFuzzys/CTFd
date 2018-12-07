@@ -180,6 +180,7 @@ def static_html(route):
 
 @views.route('/files', defaults={'path': ''})
 @views.route('/files/<path:path>')
+@check_challenge_visibility
 def files(path):
     """
     Route in charge of dealing with making sure that CTF challenges are only accessible during the competition.
@@ -188,10 +189,9 @@ def files(path):
     """
     f = Files.query.filter_by(location=path).first_or_404()
     if f.type == 'challenge':
-        if current_user.authed():
-            if current_user.is_admin() is False:
-                if not ctftime():
-                    abort(403)
+        if current_user.is_admin() is False:
+            if not ctftime():
+                abort(403)
         else:
             abort(403)
 
