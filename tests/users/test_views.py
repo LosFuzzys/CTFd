@@ -171,20 +171,11 @@ def test_user_can_access_files():
             f = gen_file(app.db, location=model_path, challenge_id=chal_id)
             url = url_for('views.files', path=model_path)
 
-            set_config('challenge_visibility', 'public')
-            # Unauthed user should return 200
-            with app.test_client() as client:
-                r = client.get(url)
-
-                assert r.status_code == 200
-                assert r.get_data(as_text=True) == 'testing file load'
-
-            set_config('challenge_visibility', 'private')
             # Unauthed user should return 403
             with app.test_client() as client:
                 r = client.get(url)
 
-                assert r.status_code == 403 or r.status_code == 302
+                assert r.status_code == 403
                 assert r.get_data(as_text=True) != 'testing file load'
 
             # Authed user should be able to see the files
