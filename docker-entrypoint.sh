@@ -2,6 +2,8 @@
 set -eo pipefail
 
 WORKERS=${WORKERS:-1}
+ACCESS_LOG=${ACCESS_LOG:--}
+ERROR_LOG=${ERROR_LOG:--}
 
 # Check that a .ctfd_secret_key file or SECRET_KEY envvar is set
 if [ ! -f .ctfd_secret_key ] && [ -z "$SECRET_KEY" ]; then
@@ -16,9 +18,11 @@ fi
 # Check that the database is available
 if [ -n "$DATABASE_URL" ]
     then
-    database=`echo $DATABASE_URL | awk -F[@//] '{print $4}'`
-    echo "Waiting for $database to be ready"
-    while ! mysqladmin ping -h $database --silent; do
+    url=`echo $DATABASE_URL | awk -F[@//] '{print $4}'`
+    database=`echo $url | awk -F[:] '{print $1}'`
+    port=`echo $url | awk -F[:] '{print $2}'`
+    echo "Waiting for $database:$port to be ready"
+    while ! mysqladmin ping -h "$database" -P "$port" --silent; do
         # Show some progress
         echo -n '.';
         sleep 1;
@@ -26,15 +30,6 @@ if [ -n "$DATABASE_URL" ]
     echo "$database is ready"
     # Give it another second.
     sleep 1;
-fi
-
-# Log to stdout/stderr by default
-if [ -n "$LOG_FOLDER" ]; then
-    ACCESS_LOG=${LOG_FOLDER}/access.log
-    ERROR_LOG=${LOG_FOLDER}/error.log
-else
-    ACCESS_LOG=-
-    ERROR_LOG=-
 fi
 
 # Initialize database
