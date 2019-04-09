@@ -11,6 +11,7 @@ from CTFd.utils.user import is_admin, get_current_user
 from CTFd.utils.countries import lookup_country_code
 from CTFd.utils.crypto import verify_password, hash_password
 from CTFd.utils.email import check_email_is_whitelisted
+from CTFd.utils import string_types
 
 
 class UserSchema(ma.ModelSchema):
@@ -39,10 +40,13 @@ class UserSchema(ma.ModelSchema):
     website = field_for(
         Users,
         'website',
-        validate=validate.URL(
-            error='Websites must be a proper URL starting with http or https',
-            schemes={'http', 'https'}
-        )
+        validate=[
+            # This is a dirty hack to let website accept empty strings so you can remove your website
+            lambda website: validate.URL(
+                error='Websites must be a proper URL starting with http or https',
+                schemes={'http', 'https'}
+            )(website) if website else True
+        ]
     )
     country = field_for(
         Users,
@@ -54,9 +58,6 @@ class UserSchema(ma.ModelSchema):
     password = field_for(
         Users,
         'password',
-        validate=[
-            validate.Length(min=1, error='Passwords must not be empty'),
-        ]
     )
 
     @pre_load
@@ -66,11 +67,14 @@ class UserSchema(ma.ModelSchema):
             return
 
         existing_user = Users.query.filter_by(name=name).first()
-        user_id = data.get('id')
-
-        if user_id and is_admin():
-            if existing_user and existing_user.id != user_id:
-                raise ValidationError('User name has already been taken', field_names=['name'])
+        if is_admin():
+            user_id = data.get('id')
+            if user_id:
+                if existing_user and existing_user.id != user_id:
+                    raise ValidationError('User name has already been taken', field_names=['name'])
+            else:
+                if existing_user:
+                    raise ValidationError('User name has already been taken', field_names=['name'])
         else:
             current_user = get_current_user()
             if name == current_user.name:
@@ -89,11 +93,15 @@ class UserSchema(ma.ModelSchema):
             return
 
         existing_user = Users.query.filter_by(email=email).first()
-        user_id = data.get('id')
 
-        if user_id and is_admin():
-            if existing_user and existing_user.id != user_id:
-                raise ValidationError('Email address has already been used', field_names=['email'])
+        if is_admin():
+            user_id = data.get('id')
+            if user_id:
+                if existing_user and existing_user.id != user_id:
+                    raise ValidationError('Email address has already been used', field_names=['email'])
+            else:
+                if existing_user:
+                    raise ValidationError('Email address has already been used', field_names=['email'])
         else:
             current_user = get_current_user()
             if email == current_user.email:
@@ -116,12 +124,11 @@ class UserSchema(ma.ModelSchema):
         password = data.get('password')
         confirm = data.get('confirm')
         target_user = get_current_user()
-        user_id = data.get('id')
 
         if is_admin():
             pass
         else:
-            if password and (confirm is None):
+            if password and (bool(confirm) is False):
                 raise ValidationError('Please confirm your current password', field_names=['confirm'])
 
             if password and confirm:
@@ -130,6 +137,9 @@ class UserSchema(ma.ModelSchema):
                     return data
                 else:
                     raise ValidationError('Your previous password is incorrect', field_names=['confirm'])
+            else:
+                data.pop('password', None)
+                data.pop('confirm', None)
 
     views = {
         'user': [
@@ -173,9 +183,9 @@ class UserSchema(ma.ModelSchema):
 
     def __init__(self, view=None, *args, **kwargs):
         if view:
-            if type(view) == str:
+            if isinstance(view, string_types):
                 kwargs['only'] = self.views[view]
-            elif type(view) == list:
+            elif isinstance(view, list):
                 kwargs['only'] = view
 
         super(UserSchema, self).__init__(*args, **kwargs)

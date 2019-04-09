@@ -28,7 +28,7 @@ teams_namespace = Namespace('teams', description="Endpoint to retrieve Teams")
 class TeamList(Resource):
     @check_account_visibility
     def get(self):
-        teams = Teams.query.filter_by(banned=False)
+        teams = Teams.query.filter_by(hidden=False, banned=False)
         view = copy.deepcopy(TeamSchema.views.get(
             session.get('type', 'user')
         ))
@@ -73,12 +73,15 @@ class TeamList(Resource):
         }
 
 
-@teams_namespace.route('/<team_id>')
+@teams_namespace.route('/<int:team_id>')
 @teams_namespace.param('team_id', "Team ID")
 class TeamPublic(Resource):
     @check_account_visibility
     def get(self, team_id):
         team = Teams.query.filter_by(id=team_id).first_or_404()
+
+        if (team.banned or team.hidden) and is_admin() is False:
+            abort(404)
 
         view = TeamSchema.views.get(session.get('type', 'user'))
         schema = TeamSchema(view=view)
@@ -196,6 +199,9 @@ class TeamSolves(Resource):
                 abort(404)
             team = Teams.query.filter_by(id=team_id).first_or_404()
 
+            if (team.banned or team.hidden) and is_admin() is False:
+                abort(404)
+
         solves = team.get_solves(
             admin=is_admin()
         )
@@ -229,6 +235,9 @@ class TeamFails(Resource):
             if accounts_visible() is False or scores_visible() is False:
                 abort(404)
             team = Teams.query.filter_by(id=team_id).first_or_404()
+
+            if (team.banned or team.hidden) and is_admin() is False:
+                abort(404)
 
         fails = team.get_fails(
             admin=is_admin()
@@ -273,6 +282,9 @@ class TeamAwards(Resource):
             if accounts_visible() is False or scores_visible() is False:
                 abort(404)
             team = Teams.query.filter_by(id=team_id).first_or_404()
+
+            if (team.banned or team.hidden) and is_admin() is False:
+                abort(404)
 
         awards = team.get_awards(
             admin=is_admin()

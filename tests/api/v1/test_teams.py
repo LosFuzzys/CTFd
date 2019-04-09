@@ -109,6 +109,50 @@ def test_api_teams_post_admin():
     destroy_ctfd(app)
 
 
+def test_api_teams_post_admin_duplicate():
+    """Test that admins can only create teams with unique information"""
+    app = create_ctfd(user_mode="teams")
+    with app.app_context():
+        gen_team(app.db, name='team1')
+        with login_as_user(app, 'admin') as client:
+            # Duplicate name
+            r = client.post(
+                '/api/v1/teams',
+                json={
+                    "website": "https://ctfd.io",
+                    "name": "team1",
+                    "country": "TW",
+                    "email": "team1@ctfd.io",
+                    "affiliation": "team",
+                    "password": "password"
+                }
+            )
+            resp = r.get_json()
+            assert r.status_code == 400
+            assert resp['errors']['name']
+            assert resp['success'] is False
+            assert Teams.query.count() == 1
+
+            # Duplicate email
+            r = client.post(
+                '/api/v1/teams',
+                json={
+                    "website": "https://ctfd.io",
+                    "name": "new_team",
+                    "country": "TW",
+                    "email": "team@ctfd.io",
+                    "affiliation": "team",
+                    "password": "password"
+                }
+            )
+            resp = r.get_json()
+            assert r.status_code == 400
+            assert resp['errors']['email']
+            assert resp['success'] is False
+            assert Teams.query.count() == 1
+    destroy_ctfd(app)
+
+
 def test_api_team_get_public():
     """Can a user get /api/v1/team/<team_id> if teams are public"""
     app = create_ctfd(user_mode="teams")
@@ -184,6 +228,7 @@ def test_api_team_patch_admin():
         with login_as_user(app, 'admin') as client:
             r = client.patch('/api/v1/teams/1', json={
                 "name": "team_name",
+                "email": "team@ctfd.io",
                 "password": "password",
                 "affiliation": "changed"
             })
@@ -191,7 +236,6 @@ def test_api_team_patch_admin():
             assert r.status_code == 200
             assert r.get_json()['data']['affiliation'] == 'changed'
             assert verify_password('password', team.password)
-
     destroy_ctfd(app)
 
 
@@ -391,4 +435,82 @@ def test_api_team_get_awards():
             r = client.get('/api/v1/teams/1/awards')
             print(r.get_json())
             assert r.status_code == 200
+    destroy_ctfd(app)
+
+
+def test_api_accessing_hidden_banned_users():
+    """Hidden/Banned users should not be visible to normal users, only to admins"""
+    app = create_ctfd(user_mode="teams")
+    with app.app_context():
+        register_user(app)
+        register_user(app, name="user2", email="user2@ctfd.io")
+        register_user(app, name="visible_user", email="visible_user@ctfd.io")
+
+        user = Users.query.filter_by(id=2).first()
+        team = gen_team(app.db, name='hidden_team', email="hidden_team@ctfd.io", hidden=True)
+        team.members.append(user)
+        user.team_id = team.id
+        app.db.session.commit()
+
+        user = Users.query.filter_by(id=3).first()
+        team = gen_team(app.db, name='banned_team', email="banned_team@ctfd.io", banned=True)
+        team.members.append(user)
+        user.team_id = team.id
+        app.db.session.commit()
+
+        with login_as_user(app, name="visible_user") as client:
+            assert client.get('/api/v1/teams/1').status_code == 404
+            assert client.get('/api/v1/teams/1/solves').status_code == 404
+            assert client.get('/api/v1/teams/1/fails').status_code == 404
+            assert client.get('/api/v1/teams/1/awards').status_code == 404
+
+            assert client.get('/api/v1/teams/2').status_code == 404
+            assert client.get('/api/v1/teams/2/solves').status_code == 404
+            assert client.get('/api/v1/teams/2/fails').status_code == 404
+            assert client.get('/api/v1/teams/2/awards').status_code == 404
+
+        with login_as_user(app, name="admin") as client:
+            assert client.get('/api/v1/teams/1').status_code == 200
+            assert client.get('/api/v1/teams/1/solves').status_code == 200
+            assert client.get('/api/v1/teams/1/fails').status_code == 200
+            assert client.get('/api/v1/teams/1/awards').status_code == 200
+
+            assert client.get('/api/v1/teams/2').status_code == 200
+            assert client.get('/api/v1/teams/2/solves').status_code == 200
+            assert client.get('/api/v1/teams/2/fails').status_code == 200
+            assert client.get('/api/v1/teams/2/awards').status_code == 200
+    destroy_ctfd(app)
+
+
+def test_api_user_without_team_challenge_interaction():
+    """Can a user interact with challenges without having joined a team?"""
+    app = create_ctfd(user_mode="teams")
+    with app.app_context():
+        register_user(app)
+        gen_challenge(app.db)
+        gen_flag(app.db, 1)
+
+        with login_as_user(app) as client:
+            assert client.get('/api/v1/challenges').status_code == 403
+            assert client.get('/api/v1/challenges/1').status_code == 403
+            assert client.post('/api/v1/challenges/attempt', json={
+                "challenge_id": 1,
+                "submission": "wrong_flag"
+            }).status_code == 403
+
+        # Create a user with a team
+        user = gen_user(app.db, email='user_name@ctfd.io')
+        team = gen_team(app.db)
+        team.members.append(user)
+        user.team_id = team.id
+        app.db.session.commit()
+
+        # Test if user with team can interact with challenges
+        with login_as_user(app, name="user_name") as client:
+            assert client.get('/api/v1/challenges').status_code == 200
+            assert client.get('/api/v1/challenges/1').status_code == 200
+            assert client.post('/api/v1/challenges/attempt', json={
+                "challenge_id": 1,
+                "submission": "flag"
+            }).status_code == 200
     destroy_ctfd(app)

@@ -28,8 +28,8 @@ def listing():
     #     count = Teams.query.filter_by(verified=True, banned=False).count()
     #     teams = Teams.query.filter_by(verified=True, banned=False).slice(page_start, page_end).all()
     # else:
-    count = Teams.query.filter_by(banned=False).count()
-    teams = Teams.query.filter_by(banned=False).slice(page_start, page_end).all()
+    count = Teams.query.filter_by(hidden=False, banned=False).count()
+    teams = Teams.query.filter_by(hidden=False, banned=False).slice(page_start, page_end).all()
 
     pages = int(count / results_per_page) + (count % results_per_page > 0)
     return render_template('teams/teams.html', teams=teams, pages=pages, curr_page=page)
@@ -128,7 +128,7 @@ def private():
 @require_team_mode
 def public(team_id):
     errors = get_errors()
-    team = Teams.query.filter_by(id=team_id).first_or_404()
+    team = Teams.query.filter_by(id=team_id, banned=False, hidden=False).first_or_404()
     solves = team.get_solves()
     awards = team.get_awards()
 
