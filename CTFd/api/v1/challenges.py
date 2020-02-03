@@ -3,13 +3,11 @@ from flask_restplus import Namespace, Resource
 from CTFd.models import (
     db,
     Challenges,
-    Unlocks,
     HintUnlocks,
     Tags,
     Hints,
     Flags,
     Solves,
-    Submissions,
     Fails,
     ChallengeFiles as ChallengeFilesModel,
 )
@@ -19,7 +17,6 @@ from CTFd.utils.decorators import (
     during_ctf_time_only,
     require_verified_emails,
     admins_only,
-    authed_only
 )
 from CTFd.utils.decorators.visibility import (
     check_challenge_visibility,
