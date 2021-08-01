@@ -1,3 +1,3 @@
-[submodule "CTFd/themes/streetech-theme"]
-	path = CTFd/themes/streetech-theme
-	url = git@github.com:KaindorfCTF/kaindorfctf-ctfd-theme.git
+[submodule "CTFd/plugins/kdfd-ctfd-plugin"]
+	path = CTFd/plugins/kdfd-ctfd-plugin
+	url = ../kdfd-ctfd-plugin.git
