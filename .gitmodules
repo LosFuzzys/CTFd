@@ -1,0 +1,3 @@
+[submodule "CTFd/plugins/kdfd-ctfd-plugin"]
+	path = CTFd/plugins/kdfd-ctfd-plugin
+	url = https://github.com/LosFuzzys/kdfd-ctfd-plugin
