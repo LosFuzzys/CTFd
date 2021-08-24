@@ -1,4 +1,4 @@
-(window["webpackJsonp"] = window["webpackJsonp"] || []).push([["default~pages/challenge~pages/challenges~pages/configs~pages/editor~pages/main~pages/notifications~p~d5a3cc0a"],{
+(window["webpackJsonp"] = window["webpackJsonp"] || []).push([["default~pages/challenge~pages/challenges~pages/configs~pages/editor~pages/kdfd_configs~pages/main~pa~bc05f225"],{
 
 /***/ "./CTFd/themes/admin/assets/js/pages/main.js":
 /*!***************************************************!*\

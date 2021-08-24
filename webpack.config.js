@@ -39,6 +39,7 @@ const roots = {
       'pages/challenge': 'assets/js/pages/challenge.js',
       'pages/challenges': 'assets/js/pages/challenges.js',
       'pages/configs': 'assets/js/pages/configs.js',
+      'pages/kdfd_configs': 'assets/js/pages/kdfd_configs.js',
       'pages/notifications': 'assets/js/pages/notifications.js',
       'pages/editor': 'assets/js/pages/editor.js',
       'pages/pages': 'assets/js/pages/pages.js',
