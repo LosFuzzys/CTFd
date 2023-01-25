@@ -9,7 +9,7 @@ from CTFd.api.v1.schemas import (
     APIDetailedSuccessResponse,
     PaginatedAPIListSuccessResponse,
 )
-from CTFd.cache import clear_standings, clear_user_session
+from CTFd.cache import clear_challenges, clear_standings, clear_user_session
 from CTFd.constants import RawEnum
 from CTFd.models import (
     Awards,
@@ -132,7 +132,6 @@ class UserList(Resource):
             "data": response.data,
         }
 
-    @users_namespace.doc()
     @admins_only
     @users_namespace.doc(
         description="Endpoint to create a User object",
@@ -166,6 +165,7 @@ class UserList(Resource):
             user_created_notification(addr=email, name=name, password=password)
 
         clear_standings()
+        clear_challenges()
 
         response = schema.dump(response.data)
 
@@ -233,16 +233,19 @@ class UserPublic(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        db.session.commit()
-
+        # This generates the response first before actually changing the type
+        # This avoids an error during User type changes where we change
+        # the polymorphic identity resulting in an ObjectDeletedError
+        # https://github.com/CTFd/CTFd/issues/1794
         response = schema.dump(response.data)
-
+        db.session.commit()
         db.session.close()
 
         clear_user_session(user_id=user_id)
         clear_standings()
+        clear_challenges()
 
-        return {"success": True, "data": response}
+        return {"success": True, "data": response.data}
 
     @admins_only
     @users_namespace.doc(
@@ -250,6 +253,13 @@ class UserPublic(Resource):
         responses={200: ("Success", "APISimpleSuccessResponse")},
     )
     def delete(self, user_id):
+        # Admins should not be able to delete themselves
+        if user_id == session["id"]:
+            return (
+                {"success": False, "errors": {"id": "You cannot delete yourself"}},
+                400,
+            )
+
         Notifications.query.filter_by(user_id=user_id).delete()
         Awards.query.filter_by(user_id=user_id).delete()
         Unlocks.query.filter_by(user_id=user_id).delete()
@@ -262,6 +272,7 @@ class UserPublic(Resource):
 
         clear_user_session(user_id=user_id)
         clear_standings()
+        clear_challenges()
 
         return {"success": True}
 
@@ -314,6 +325,7 @@ class UserPrivate(Resource):
         db.session.close()
 
         clear_standings()
+        clear_challenges()
 
         return {"success": True, "data": response.data}
 
@@ -331,7 +343,8 @@ class UserPrivateSolves(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}
 
 
 @users_namespace.route("/me/fails")
@@ -342,16 +355,20 @@ class UserPrivateFails(Resource):
         fails = user.get_fails(admin=True)
 
         view = "user" if not is_admin() else "admin"
-        response = SubmissionSchema(view=view, many=True).dump(fails)
-        if response.errors:
-            return {"success": False, "errors": response.errors}, 400
 
+        # We want to return the count purely for stats & graphs
+        # but this data isn't really needed by the end user.
+        # Only actually show fail data for admins.
         if is_admin():
+            response = SubmissionSchema(view=view, many=True).dump(fails)
+            if response.errors:
+                return {"success": False, "errors": response.errors}, 400
+
             data = response.data
         else:
             data = []
-        count = len(response.data)
 
+        count = len(fails)
         return {"success": True, "data": data, "meta": {"count": count}}
 
 
@@ -369,7 +386,8 @@ class UserPrivateAwards(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}
 
 
 @users_namespace.route("/<user_id>/solves")
@@ -391,7 +409,8 @@ class UserPublicSolves(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}
 
 
 @users_namespace.route("/<user_id>/fails")
@@ -407,16 +426,20 @@ class UserPublicFails(Resource):
         fails = user.get_fails(admin=is_admin())
 
         view = "user" if not is_admin() else "admin"
-        response = SubmissionSchema(view=view, many=True).dump(fails)
-        if response.errors:
-            return {"success": False, "errors": response.errors}, 400
 
+        # We want to return the count purely for stats & graphs
+        # but this data isn't really needed by the end user.
+        # Only actually show fail data for admins.
         if is_admin():
+            response = SubmissionSchema(view=view, many=True).dump(fails)
+            if response.errors:
+                return {"success": False, "errors": response.errors}, 400
+
             data = response.data
         else:
             data = []
-        count = len(response.data)
 
+        count = len(fails)
         return {"success": True, "data": data, "meta": {"count": count}}
 
 
@@ -438,7 +461,8 @@ class UserPublicAwards(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}
 
 
 @users_namespace.route("/<int:user_id>/email")
@@ -469,4 +493,10 @@ class UserEmails(Resource):
 
         result, response = sendmail(addr=user.email, text=text)
 
-        return {"success": result}
+        if result is True:
+            return {"success": True}
+        else:
+            return (
+                {"success": False, "errors": {"": [response]}},
+                400,
+            )

@@ -16,7 +16,7 @@ class UserSchema(ma.ModelSchema):
     class Meta:
         model = Users
         include_fk = True
-        dump_only = ("id", "oauth_id", "created")
+        dump_only = ("id", "oauth_id", "created", "team_id")
         load_only = ("password",)
 
     name = field_for(
@@ -51,7 +51,7 @@ class UserSchema(ma.ModelSchema):
         ],
     )
     country = field_for(Users, "country", validate=[validate_country_code])
-    password = field_for(Users, "password")
+    password = field_for(Users, "password", required=True, allow_none=False)
     fields = Nested(
         UserFieldEntriesSchema, partial=True, many=True, attribute="field_entries"
     )
@@ -245,21 +245,24 @@ class UserSchema(ma.ModelSchema):
                 # # Check that we have an existing field for this. May be unnecessary b/c the foriegn key should enforce
                 field = UserFields.query.filter_by(id=field_id).first_or_404()
 
-                if field.required is True and value.strip() == "":
-                    raise ValidationError(
-                        f"Field '{field.name}' is required", field_names=["fields"]
-                    )
-
-                if field.editable is False:
-                    raise ValidationError(
-                        f"Field '{field.name}' cannot be editted",
-                        field_names=["fields"],
-                    )
-
                 # Get the existing field entry if one exists
                 entry = UserFieldEntries.query.filter_by(
                     field_id=field.id, user_id=current_user.id
                 ).first()
+
+                if field.required is True:
+                    if isinstance(value, str):
+                        if value.strip() == "":
+                            raise ValidationError(
+                                f"Field '{field.name}' is required",
+                                field_names=["fields"],
+                            )
+
+                if field.editable is False and entry is not None:
+                    raise ValidationError(
+                        f"Field '{field.name}' cannot be editted",
+                        field_names=["fields"],
+                    )
 
                 if entry:
                     f["id"] = entry.id
@@ -316,6 +319,7 @@ class UserSchema(ma.ModelSchema):
             "id",
             "oauth_id",
             "fields",
+            "team_id",
         ],
         "self": [
             "website",
@@ -328,6 +332,7 @@ class UserSchema(ma.ModelSchema):
             "oauth_id",
             "password",
             "fields",
+            "team_id",
         ],
         "admin": [
             "website",
@@ -346,6 +351,7 @@ class UserSchema(ma.ModelSchema):
             "type",
             "verified",
             "fields",
+            "team_id",
         ],
     }
 

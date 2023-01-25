@@ -10,13 +10,20 @@ from CTFd.api.v1.schemas import (
     APIDetailedSuccessResponse,
     PaginatedAPIListSuccessResponse,
 )
-from CTFd.cache import clear_standings, clear_team_session, clear_user_session
+from CTFd.cache import (
+    clear_challenges,
+    clear_standings,
+    clear_team_session,
+    clear_user_session,
+)
 from CTFd.constants import RawEnum
 from CTFd.models import Awards, Submissions, Teams, Unlocks, Users, db
 from CTFd.schemas.awards import AwardSchema
 from CTFd.schemas.submissions import SubmissionSchema
 from CTFd.schemas.teams import TeamSchema
+from CTFd.utils import get_config
 from CTFd.utils.decorators import admins_only, authed_only, require_team
+from CTFd.utils.decorators.modes import require_team_mode
 from CTFd.utils.decorators.visibility import (
     check_account_visibility,
     check_score_visibility,
@@ -49,6 +56,8 @@ teams_namespace.schema_model(
 
 @teams_namespace.route("")
 class TeamList(Resource):
+    method_decorators = [require_team_mode]
+
     @check_account_visibility
     @teams_namespace.doc(
         description="Endpoint to get Team objects in bulk",
@@ -151,6 +160,7 @@ class TeamList(Resource):
         db.session.close()
 
         clear_standings()
+        clear_challenges()
 
         return {"success": True, "data": response.data}
 
@@ -158,6 +168,8 @@ class TeamList(Resource):
 @teams_namespace.route("/<int:team_id>")
 @teams_namespace.param("team_id", "Team ID")
 class TeamPublic(Resource):
+    method_decorators = [require_team_mode]
+
     @check_account_visibility
     @teams_namespace.doc(
         description="Endpoint to get a specific Team object",
@@ -214,6 +226,7 @@ class TeamPublic(Resource):
 
         clear_team_session(team_id=team.id)
         clear_standings()
+        clear_challenges()
 
         db.session.close()
 
@@ -237,6 +250,7 @@ class TeamPublic(Resource):
 
         clear_team_session(team_id=team_id)
         clear_standings()
+        clear_challenges()
 
         db.session.close()
 
@@ -246,6 +260,8 @@ class TeamPublic(Resource):
 @teams_namespace.route("/me")
 @teams_namespace.param("team_id", "Current Team")
 class TeamPrivate(Resource):
+    method_decorators = [require_team_mode]
+
     @authed_only
     @require_team
     @teams_namespace.doc(
@@ -306,10 +322,101 @@ class TeamPrivate(Resource):
 
         return {"success": True, "data": response.data}
 
+    @authed_only
+    @require_team
+    @teams_namespace.doc(
+        description="Endpoint to disband your current team. Can only be used if the team has performed no actions in the CTF.",
+        responses={200: ("Success", "APISimpleSuccessResponse")},
+    )
+    def delete(self):
+        team_disbanding = get_config("team_disbanding", default="inactive_only")
+        if team_disbanding == "disabled":
+            return (
+                {
+                    "success": False,
+                    "errors": {"": ["Team disbanding is currently disabled"]},
+                },
+                403,
+            )
+
+        team = get_current_team()
+        if team.captain_id != session["id"]:
+            return (
+                {
+                    "success": False,
+                    "errors": {"": ["Only team captains can disband their team"]},
+                },
+                403,
+            )
+
+        # The team must not have performed any actions in the CTF
+        performed_actions = any(
+            [
+                team.solves != [],
+                team.fails != [],
+                team.awards != [],
+                Submissions.query.filter_by(team_id=team.id).all() != [],
+                Unlocks.query.filter_by(team_id=team.id).all() != [],
+            ]
+        )
+
+        if performed_actions:
+            return (
+                {
+                    "success": False,
+                    "errors": {
+                        "": [
+                            "You cannot disband your team as it has participated in the event. "
+                            "Please contact an admin to disband your team or remove a member."
+                        ]
+                    },
+                },
+                403,
+            )
+
+        for member in team.members:
+            member.team_id = None
+            clear_user_session(user_id=member.id)
+
+        db.session.delete(team)
+        db.session.commit()
+
+        clear_team_session(team_id=team.id)
+        clear_standings()
+        clear_challenges()
+
+        db.session.close()
+
+        return {"success": True}
+
+
+@teams_namespace.route("/me/members")
+class TeamPrivateMembers(Resource):
+    method_decorators = [require_team_mode]
+
+    @authed_only
+    @require_team
+    def post(self):
+        team = get_current_team()
+        if team.captain_id != session["id"]:
+            return (
+                {
+                    "success": False,
+                    "errors": {"": ["Only team captains can generate invite codes"]},
+                },
+                403,
+            )
+
+        invite_code = team.get_invite_code()
+        response = {"code": invite_code}
+        return {"success": True, "data": response}
+
 
 @teams_namespace.route("/<team_id>/members")
 @teams_namespace.param("team_id", "Team ID")
 class TeamMembers(Resource):
+    method_decorators = [require_team_mode]
+
     @admins_only
     def get(self, team_id):
         team = Teams.query.filter_by(id=team_id).first_or_404()
@@ -329,8 +436,14 @@ class TeamMembers(Resource):
     def post(self, team_id):
         team = Teams.query.filter_by(id=team_id).first_or_404()
 
+        # Generate an invite code if no user or body is specified
+        if len(request.data) == 0:
+            invite_code = team.get_invite_code()
+            response = {"code": invite_code}
+            return {"success": True, "data": response}
+
         data = request.get_json()
-        user_id = data["user_id"]
+        user_id = data.get("user_id")
         user = Users.query.filter_by(id=user_id).first_or_404()
         if user.team_id is None:
             team.members.append(user)
@@ -392,6 +505,8 @@ class TeamMembers(Resource):
 
 @teams_namespace.route("/me/solves")
 class TeamPrivateSolves(Resource):
+    method_decorators = [require_team_mode]
+
     @authed_only
     @require_team
     def get(self):
@@ -405,11 +520,14 @@ class TeamPrivateSolves(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}
 
 
 @teams_namespace.route("/me/fails")
 class TeamPrivateFails(Resource):
+    method_decorators = [require_team_mode]
+
     @authed_only
     @require_team
     def get(self):
@@ -418,23 +536,28 @@ class TeamPrivateFails(Resource):
 
         view = "admin" if is_admin() else "user"
 
-        schema = SubmissionSchema(view=view, many=True)
-        response = schema.dump(fails)
-
-        if response.errors:
-            return {"success": False, "errors": response.errors}, 400
-
+        # We want to return the count purely for stats & graphs
+        # but this data isn't really needed by the end user.
+        # Only actually show fail data for admins.
         if is_admin():
+            schema = SubmissionSchema(view=view, many=True)
+            response = schema.dump(fails)
+
+            if response.errors:
+                return {"success": False, "errors": response.errors}, 400
+
             data = response.data
         else:
             data = []
-        count = len(response.data)
+        count = len(fails)
 
         return {"success": True, "data": data, "meta": {"count": count}}
 
 
 @teams_namespace.route("/me/awards")
 class TeamPrivateAwards(Resource):
+    method_decorators = [require_team_mode]
+
     @authed_only
     @require_team
     def get(self):
@@ -447,12 +570,15 @@ class TeamPrivateAwards(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}
 
 
 @teams_namespace.route("/<team_id>/solves")
 @teams_namespace.param("team_id", "Team ID")
 class TeamPublicSolves(Resource):
+    method_decorators = [require_team_mode]
+
     @check_account_visibility
     @check_score_visibility
     def get(self, team_id):
@@ -469,12 +595,15 @@ class TeamPublicSolves(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}
 
 
 @teams_namespace.route("/<team_id>/fails")
 @teams_namespace.param("team_id", "Team ID")
 class TeamPublicFails(Resource):
+    method_decorators = [require_team_mode]
+
     @check_account_visibility
     @check_score_visibility
     def get(self, team_id):
@@ -486,17 +615,20 @@ class TeamPublicFails(Resource):
 
         view = "admin" if is_admin() else "user"
 
-        schema = SubmissionSchema(view=view, many=True)
-        response = schema.dump(fails)
-
-        if response.errors:
-            return {"success": False, "errors": response.errors}, 400
-
+        # We want to return the count purely for stats & graphs
+        # but this data isn't really needed by the end user.
+        # Only actually show fail data for admins.
         if is_admin():
+            schema = SubmissionSchema(view=view, many=True)
+            response = schema.dump(fails)
+
+            if response.errors:
+                return {"success": False, "errors": response.errors}, 400
+
             data = response.data
         else:
             data = []
-        count = len(response.data)
+        count = len(fails)
 
         return {"success": True, "data": data, "meta": {"count": count}}
 
@@ -504,6 +636,8 @@ class TeamPublicFails(Resource):
 @teams_namespace.route("/<team_id>/awards")
 @teams_namespace.param("team_id", "Team ID")
 class TeamPublicAwards(Resource):
+    method_decorators = [require_team_mode]
+
     @check_account_visibility
     @check_score_visibility
     def get(self, team_id):
@@ -519,4 +653,5 @@ class TeamPublicAwards(Resource):
         if response.errors:
             return {"success": False, "errors": response.errors}, 400
 
-        return {"success": True, "data": response.data}
+        count = len(response.data)
+        return {"success": True, "data": response.data, "meta": {"count": count}}

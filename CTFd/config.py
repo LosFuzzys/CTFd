@@ -1,6 +1,9 @@
 import configparser
 import os
 from distutils.util import strtobool
+from typing import Union
+
+from sqlalchemy.engine.url import URL
 
 
 class EnvInterpolation(configparser.BasicInterpolation):
@@ -55,7 +58,7 @@ def gen_secret_key():
     try:
         with open(".ctfd_secret_key", "rb") as secret:
             key = secret.read()
-    except (OSError, IOError):
+    except OSError:
         key = None
 
     if not key:
@@ -66,7 +69,7 @@ def gen_secret_key():
             with open(".ctfd_secret_key", "wb") as secret:
                 secret.write(key)
                 secret.flush()
-        except (OSError, IOError):
+        except OSError:
             pass
     return key
 
@@ -82,13 +85,43 @@ class ServerConfig(object):
     SECRET_KEY: str = empty_str_cast(config_ini["server"]["SECRET_KEY"]) \
         or gen_secret_key()
 
-    DATABASE_URL: str = empty_str_cast(config_ini["server"]["DATABASE_URL"]) \
-        or f"sqlite:///{os.path.dirname(os.path.abspath(__file__))}/ctfd.db"
+    DATABASE_URL: str = empty_str_cast(config_ini["server"]["DATABASE_URL"])
+    if not DATABASE_URL:
+        if empty_str_cast(config_ini["server"]["DATABASE_HOST"]) is not None:
+            # construct URL from individual variables
+            DATABASE_URL = str(URL(
+                drivername=empty_str_cast(config_ini["server"]["DATABASE_PROTOCOL"]) or "mysql+pymysql",
+                username=empty_str_cast(config_ini["server"]["DATABASE_USER"]) or "ctfd",
+                password=empty_str_cast(config_ini["server"]["DATABASE_PASSWORD"]),
+                host=empty_str_cast(config_ini["server"]["DATABASE_HOST"]),
+                port=empty_str_cast(config_ini["server"]["DATABASE_PORT"]),
+                database=empty_str_cast(config_ini["server"]["DATABASE_NAME"]) or "ctfd",
+            ))
+        else:
+            # default to local SQLite DB
+            DATABASE_URL = f"sqlite:///{os.path.dirname(os.path.abspath(__file__))}/ctfd.db"
 
     REDIS_URL: str = empty_str_cast(config_ini["server"]["REDIS_URL"])
 
+    REDIS_HOST: str = empty_str_cast(config_ini["server"]["REDIS_HOST"])
+    REDIS_PROTOCOL: str = empty_str_cast(config_ini["server"]["REDIS_PROTOCOL"]) or "redis"
+    REDIS_USER: str = empty_str_cast(config_ini["server"]["REDIS_USER"])
+    REDIS_PASSWORD: str = empty_str_cast(config_ini["server"]["REDIS_PASSWORD"])
+    REDIS_PORT: int = empty_str_cast(config_ini["server"]["REDIS_PORT"]) or 6379
+    REDIS_DB: int = empty_str_cast(config_ini["server"]["REDIS_DB"]) or 0
+
+    if REDIS_URL or REDIS_HOST is None:
+        CACHE_REDIS_URL = REDIS_URL
+    else:
+        # construct URL from individual variables
+        CACHE_REDIS_URL = f"{REDIS_PROTOCOL}://"
+        if REDIS_USER:
+            CACHE_REDIS_URL += REDIS_USER
+        if REDIS_PASSWORD:
+            CACHE_REDIS_URL += f":{REDIS_PASSWORD}"
+        CACHE_REDIS_URL += f"@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
-    CACHE_REDIS_URL = REDIS_URL
     if CACHE_REDIS_URL:
         CACHE_TYPE: str = "redis"
     else:
@@ -131,7 +164,7 @@ class ServerConfig(object):
 
     # === EMAIL ===
     MAILFROM_ADDR: str = config_ini["email"]["MAILFROM_ADDR"] \
-        or "noreply@ctfd.io"
+        or "noreply@examplectf.com"
 
     MAIL_SERVER: str = empty_str_cast(config_ini["email"]["MAIL_SERVER"])
 
@@ -153,6 +186,8 @@ class ServerConfig(object):
 
     MAILGUN_BASE_URL: str = empty_str_cast(config_ini["email"]["MAILGUN_API_KEY"])
 
+    MAIL_PROVIDER: str = empty_str_cast(config_ini["email"].get("MAIL_PROVIDER"))
+
     # === LOGS ===
     LOG_FOLDER: str = empty_str_cast(config_ini["logs"]["LOG_FOLDER"]) \
         or os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
@@ -173,24 +208,30 @@ class ServerConfig(object):
 
         AWS_S3_ENDPOINT_URL: str = empty_str_cast(config_ini["uploads"]["AWS_S3_ENDPOINT_URL"])
 
+        AWS_S3_REGION: str = empty_str_cast(config_ini["uploads"]["AWS_S3_REGION"])
+
     # === OPTIONAL ===
-    REVERSE_PROXY: bool = empty_str_cast(config_ini["optional"]["REVERSE_PROXY"], default=False)
+    REVERSE_PROXY: Union[str, bool] = empty_str_cast(config_ini["optional"]["REVERSE_PROXY"], default=False)
 
-    TEMPLATES_AUTO_RELOAD: bool = empty_str_cast(config_ini["optional"]["TEMPLATES_AUTO_RELOAD"], default=True)
+    TEMPLATES_AUTO_RELOAD: bool = process_boolean_str(empty_str_cast(config_ini["optional"]["TEMPLATES_AUTO_RELOAD"], default=True))
 
-    SQLALCHEMY_TRACK_MODIFICATIONS: bool = empty_str_cast(config_ini["optional"]["SQLALCHEMY_TRACK_MODIFICATIONS"], default=False)
+    THEME_FALLBACK: bool = process_boolean_str(empty_str_cast(config_ini["optional"]["THEME_FALLBACK"], default=True))
 
-    SWAGGER_UI: bool = empty_str_cast(config_ini["optional"]["SWAGGER_UI"], default=False)
+    SQLALCHEMY_TRACK_MODIFICATIONS: bool = process_boolean_str(empty_str_cast(config_ini["optional"]["SQLALCHEMY_TRACK_MODIFICATIONS"], default=False))
+
+    SWAGGER_UI: bool = process_boolean_str(empty_str_cast(config_ini["optional"]["SWAGGER_UI"], default=False))
 
     SWAGGER_UI_ENDPOINT: str = "/" if SWAGGER_UI else None
 
-    UPDATE_CHECK: bool = empty_str_cast(config_ini["optional"]["UPDATE_CHECK"], default=True)
+    UPDATE_CHECK: bool = process_boolean_str(empty_str_cast(config_ini["optional"]["UPDATE_CHECK"], default=True))
 
     APPLICATION_ROOT: str = empty_str_cast(config_ini["optional"]["APPLICATION_ROOT"], default="/")
 
-    SERVER_SENT_EVENTS: bool = empty_str_cast(config_ini["optional"]["SERVER_SENT_EVENTS"], default=True)
+    SERVER_SENT_EVENTS: bool = process_boolean_str(empty_str_cast(config_ini["optional"]["SERVER_SENT_EVENTS"], default=True))
 
-    HTML_SANITIZATION: bool = empty_str_cast(config_ini["optional"]["HTML_SANITIZATION"], default=False)
+    HTML_SANITIZATION: bool = process_boolean_str(empty_str_cast(config_ini["optional"]["HTML_SANITIZATION"], default=False))
+
+    SAFE_MODE: bool = process_boolean_str(empty_str_cast(config_ini["optional"].get("SAFE_MODE", False), default=False))
 
     if DATABASE_URL.startswith("sqlite") is False:
         SQLALCHEMY_ENGINE_OPTIONS = {
@@ -210,6 +251,7 @@ class TestingConfig(ServerConfig):
     TESTING = True
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.getenv("TESTING_DATABASE_URL") or "sqlite://"
+    MAIL_SERVER = os.getenv("TESTING_MAIL_SERVER")
     SERVER_NAME = "localhost"
     UPDATE_CHECK = False
     REDIS_URL = None

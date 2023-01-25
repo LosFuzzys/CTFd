@@ -1,6 +1,6 @@
 import "./main";
 import $ from "jquery";
-import Moment from "moment-timezone";
+import dayjs from "dayjs";
 import CTFd from "../CTFd";
 
 function switchTab(event) {
@@ -33,12 +33,10 @@ function processDateTime(datetime) {
   return function(_event) {
     let date_picker = $(`#${datetime}-date`);
     let time_picker = $(`#${datetime}-time`);
-    let unix_time = Moment(
+    let unix_time = dayjs(
       `${date_picker.val()} ${time_picker.val()}`,
       "YYYY-MM-DD HH:mm"
-    )
-      .utc()
-      .unix();
+    ).unix();
 
     if (isNaN(unix_time)) {
       $(`#${datetime}-preview`).val("");
@@ -101,6 +99,42 @@ $(() => {
     $("#config-color-picker").val("");
   });
 
+  $("#ctf_logo").on("change", function() {
+    if (this.files[0].size > 128000) {
+      if (
+        !confirm(
+          "This image file is larger than 128KB which may result in increased load times. Are you sure you'd like to use this logo?"
+        )
+      ) {
+        this.value = "";
+      }
+    }
+  });
+
+  $("#ctf_banner").on("change", function() {
+    if (this.files[0].size > 512000) {
+      if (
+        !confirm(
+          "This image file is larger than 512KB which may result in increased load times. Are you sure you'd like to use this icon?"
+        )
+      ) {
+        this.value = "";
+      }
+    }
+  });
+
+  $("#ctf_small_icon").on("change", function() {
+    if (this.files[0].size > 32000) {
+      if (
+        !confirm(
+          "This image file is larger than 32KB which may result in increased load times. Are you sure you'd like to use this icon?"
+        )
+      ) {
+        this.value = "";
+      }
+    }
+  });
+
   window.addEventListener("storage", function(event) {
     if (event.key == "integrations" && event.newValue) {
       let integration = JSON.parse(event.newValue);
@@ -121,13 +155,11 @@ $(() => {
         .val();
 
       $.ajax({
-        type: "POST",
         url:
-          "https://ctfd.us15.list-manage.com/subscribe/post-json?u=6c7fa6feeced52775aec9d015&id=dd1484208e&c=?",
+          "https://newsletters.ctfd.io/lists/ot889gr1sa0e1/subscribe/post-json?c=?",
         data: {
-          EMAIL: email,
-          subscribe: "Subscribe",
-          b_6c7fa6feeced52775aec9d015_dd1484208e: ""
+          email: email,
+          b_38e27f7d496889133d2214208_d7c3ed71f9: ""
         },
         dataType: "jsonp",
         contentType: "application/json; charset=utf-8"

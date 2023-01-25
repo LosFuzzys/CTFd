@@ -14,6 +14,12 @@ class ConfigTypes(str, RawEnum):
 
 
 @JinjaEnum
+class UserModeTypes(str, RawEnum):
+    USERS = "users"
+    TEAMS = "teams"
+
+
+@JinjaEnum
 class ChallengeVisibilityTypes(str, RawEnum):
     PUBLIC = "public"
     PRIVATE = "private"
@@ -50,6 +56,13 @@ class _ConfigsWrapper:
         return get_config("ctf_name", default="CTFd")
 
     @property
+    def ctf_small_icon(self):
+        icon = get_config("ctf_small_icon")
+        if icon:
+            return url_for("views.files", path=icon)
+        return url_for("views.themes", path="img/favicon.ico")
+
+    @property
     def theme_header(self):
         from CTFd.utils.helpers import markup
 
@@ -63,7 +76,10 @@ class _ConfigsWrapper:
 
     @property
     def theme_settings(self):
-        return json.loads(get_config("theme_settings", default="null"))
+        try:
+            return json.loads(get_config("theme_settings", default="null"))
+        except json.JSONDecodeError:
+            return {"error": "invalid theme_settings"}
 
     @property
     def tos_or_privacy(self):

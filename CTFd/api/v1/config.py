@@ -6,7 +6,7 @@ from flask_restx import Namespace, Resource
 from CTFd.api.v1.helpers.request import validate_args
 from CTFd.api.v1.helpers.schemas import sqlalchemy_to_pydantic
 from CTFd.api.v1.schemas import APIDetailedSuccessResponse, APIListSuccessResponse
-from CTFd.cache import clear_config, clear_standings
+from CTFd.cache import clear_challenges, clear_config, clear_standings
 from CTFd.constants import RawEnum
 from CTFd.models import Configs, Fields, db
 from CTFd.schemas.config import ConfigSchema
@@ -99,6 +99,7 @@ class ConfigList(Resource):
 
         clear_config()
         clear_standings()
+        clear_challenges()
 
         return {"success": True, "data": response.data}
 
@@ -109,12 +110,17 @@ class ConfigList(Resource):
     )
     def patch(self):
         req = request.get_json()
+        schema = ConfigSchema()
 
         for key, value in req.items():
+            response = schema.load({"key": key, "value": value})
+            if response.errors:
+                return {"success": False, "errors": response.errors}, 400
             set_config(key=key, value=value)
 
         clear_config()
         clear_standings()
+        clear_challenges()
 
         return {"success": True}
 
@@ -159,11 +165,11 @@ class Config(Resource):
             schema = ConfigSchema()
             data["key"] = config_key
             response = schema.load(data)
-            db.session.add(response.data)
 
         if response.errors:
-            return response.errors, 400
+            return {"success": False, "errors": response.errors}, 400
 
+        db.session.add(response.data)
         db.session.commit()
 
         response = schema.dump(response.data)
@@ -171,6 +177,7 @@ class Config(Resource):
 
         clear_config()
         clear_standings()
+        clear_challenges()
 
         return {"success": True, "data": response.data}
 
@@ -188,6 +195,7 @@ class Config(Resource):
 
         clear_config()
         clear_standings()
+        clear_challenges()
 
         return {"success": True}
 

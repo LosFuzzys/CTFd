@@ -10,7 +10,7 @@
 		<div class="row">
 			<div class="col-md-12">
 				{% with form = Forms.notifications.NotificationForm() %}
-				<form method="POST" id="notifications_form">
+				<form method="POST" id="notifications_form" autocomplete="off">
 					<div class="form-group">
 						<b>{{ form.title.label }}</b>
 						{{ form.title(class="form-control") }}
@@ -75,7 +75,7 @@
 						<div class="card-body">
 							<h3 class="card-title">{{ notification.title }}</h3>
 							<blockquote class="blockquote mb-0">
-								<p>{{ notification.content | safe }}</p>
+								<p>{{ notification.html }}</p>
 								<small class="text-muted"><span data-time="{{ notification.date | isoformat }}"></span></small>
 							</blockquote>
 						</div>

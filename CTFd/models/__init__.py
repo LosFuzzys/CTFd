@@ -3,6 +3,7 @@ from collections import defaultdict
 
 from flask_marshmallow import Marshmallow
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import column_property, validates
 
@@ -25,6 +26,16 @@ def get_class_by_tablename(tablename):
     return None
 
 
+@compiles(db.DateTime, "mysql")
+def compile_datetime_mysql(_type, _compiler, **kw):
+    """
+    This decorator makes the default db.DateTime class always enable fsp to enable millisecond precision
+    https://dev.mysql.com/doc/refman/5.7/en/fractional-seconds.html
+    https://docs.sqlalchemy.org/en/14/core/custom_types.html#overriding-type-compilation
+    """
+    return "DATETIME(6)"
+
+
 class Notifications(db.Model):
     __tablename__ = "notifications"
     id = db.Column(db.Integer, primary_key=True)
@@ -36,6 +47,13 @@ class Notifications(db.Model):
 
     user = db.relationship("Users", foreign_keys="Notifications.user_id", lazy="select")
     team = db.relationship("Teams", foreign_keys="Notifications.team_id", lazy="select")
+
+    @property
+    def html(self):
+        from CTFd.utils.config.pages import build_markdown
+        from CTFd.utils.helpers import markup
+
+        return markup(build_markdown(self.content))
 
     def __init__(self, *args, **kwargs):
         super(Notifications, self).__init__(**kwargs)
@@ -50,9 +68,21 @@ class Pages(db.Model):
     draft = db.Column(db.Boolean)
     hidden = db.Column(db.Boolean)
     auth_required = db.Column(db.Boolean)
+    format = db.Column(db.String(80), default="markdown")
     # TODO: Use hidden attribute
 
     files = db.relationship("PageFiles", backref="page")
+
+    @property
+    def html(self):
+        from CTFd.utils.config.pages import build_html, build_markdown
+
+        if self.format == "markdown":
+            return build_markdown(self.content)
+        elif self.format == "html":
+            return build_html(self.content)
+        else:
+            return build_markdown(self.content)
 
     def __init__(self, *args, **kwargs):
         super(Pages, self).__init__(**kwargs)
@@ -66,6 +96,8 @@ class Challenges(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80))
     description = db.Column(db.Text)
+    connection_info = db.Column(db.Text)
+    next_id = db.Column(db.Integer, db.ForeignKey("challenges.id", ondelete="SET NULL"))
     max_attempts = db.Column(db.Integer, default=0)
     value = db.Column(db.Integer)
     category = db.Column(db.String(80))
@@ -78,6 +110,7 @@ class Challenges(db.Model):
     hints = db.relationship("Hints", backref="challenge")
     flags = db.relationship("Flags", backref="challenge")
     comments = db.relationship("ChallengeComments", backref="challenge")
+    topics = db.relationship("ChallengeTopics", backref="challenge")
 
     class alt_defaultdict(defaultdict):
         """
@@ -98,10 +131,16 @@ class Challenges(db.Model):
 
     @property
     def html(self):
-        from CTFd.utils.config.pages import build_html
+        from CTFd.utils.config.pages import build_markdown
         from CTFd.utils.helpers import markup
 
-        return markup(build_html(self.description))
+        return markup(build_markdown(self.description))
+
+    @property
+    def plugin_class(self):
+        from CTFd.plugins.challenges import get_chal_class
+
+        return get_chal_class(self.type)
 
     def __init__(self, *args, **kwargs):
         super(Challenges, self).__init__(**kwargs)
@@ -137,10 +176,10 @@ class Hints(db.Model):
 
     @property
     def html(self):
-        from CTFd.utils.config.pages import build_html
+        from CTFd.utils.config.pages import build_markdown
         from CTFd.utils.helpers import markup
 
-        return markup(build_html(self.content))
+        return markup(build_markdown(self.content))
 
     def __init__(self, *args, **kwargs):
         super(Hints, self).__init__(**kwargs)
@@ -195,6 +234,31 @@ class Tags(db.Model):
 
     def __init__(self, *args, **kwargs):
         super(Tags, self).__init__(**kwargs)
+
+
+class Topics(db.Model):
+    __tablename__ = "topics"
+    id = db.Column(db.Integer, primary_key=True)
+    value = db.Column(db.String(255), unique=True)
+
+    def __init__(self, *args, **kwargs):
+        super(Topics, self).__init__(**kwargs)
+
+
+class ChallengeTopics(db.Model):
+    __tablename__ = "challenge_topics"
+    id = db.Column(db.Integer, primary_key=True)
+    challenge_id = db.Column(
+        db.Integer, db.ForeignKey("challenges.id", ondelete="CASCADE")
+    )
+    topic_id = db.Column(db.Integer, db.ForeignKey("topics.id", ondelete="CASCADE"))
+
+    topic = db.relationship(
+        "Topics", foreign_keys="ChallengeTopics.topic_id", lazy="select"
+    )
+
+    def __init__(self, *args, **kwargs):
+        super(ChallengeTopics, self).__init__(**kwargs)
 
 
 class Files(db.Model):
@@ -342,6 +406,22 @@ class Users(db.Model):
         else:
             return None
 
+    @property
+    def filled_all_required_fields(self):
+        required_user_fields = {
+            u.id
+            for u in UserFields.query.with_entities(UserFields.id)
+            .filter_by(required=True)
+            .all()
+        }
+        submitted_user_fields = {
+            u.field_id
+            for u in UserFieldEntries.query.with_entities(UserFieldEntries.field_id)
+            .filter_by(user_id=self.id)
+            .all()
+        }
+        return required_user_fields.issubset(submitted_user_fields)
+
     def get_fields(self, admin=False):
         if admin:
             return self.field_entries
@@ -353,7 +433,7 @@ class Users(db.Model):
     def get_solves(self, admin=False):
         from CTFd.utils import get_config
 
-        solves = Solves.query.filter_by(user_id=self.id)
+        solves = Solves.query.filter_by(user_id=self.id).order_by(Solves.date.desc())
         freeze = get_config("freeze")
         if freeze and admin is False:
             dt = datetime.datetime.utcfromtimestamp(freeze)
@@ -363,7 +443,7 @@ class Users(db.Model):
     def get_fails(self, admin=False):
         from CTFd.utils import get_config
 
-        fails = Fails.query.filter_by(user_id=self.id)
+        fails = Fails.query.filter_by(user_id=self.id).order_by(Fails.date.desc())
         freeze = get_config("freeze")
         if freeze and admin is False:
             dt = datetime.datetime.utcfromtimestamp(freeze)
@@ -373,7 +453,7 @@ class Users(db.Model):
     def get_awards(self, admin=False):
         from CTFd.utils import get_config
 
-        awards = Awards.query.filter_by(user_id=self.id)
+        awards = Awards.query.filter_by(user_id=self.id).order_by(Awards.date.desc())
         freeze = get_config("freeze")
         if freeze and admin is False:
             dt = datetime.datetime.utcfromtimestamp(freeze)
@@ -513,6 +593,22 @@ class Teams(db.Model):
         else:
             return None
 
+    @property
+    def filled_all_required_fields(self):
+        required_team_fields = {
+            u.id
+            for u in TeamFields.query.with_entities(TeamFields.id)
+            .filter_by(required=True)
+            .all()
+        }
+        submitted_team_fields = {
+            u.field_id
+            for u in TeamFieldEntries.query.with_entities(TeamFieldEntries.field_id)
+            .filter_by(team_id=self.id)
+            .all()
+        }
+        return required_team_fields.issubset(submitted_team_fields)
+
     def get_fields(self, admin=False):
         if admin:
             return self.field_entries
@@ -521,13 +617,69 @@ class Teams(db.Model):
             entry for entry in self.field_entries if entry.field.public and entry.value
         ]
 
+    def get_invite_code(self):
+        from flask import current_app
+        from CTFd.utils.security.signing import serialize, hmac
+
+        secret_key = current_app.config["SECRET_KEY"]
+        if isinstance(secret_key, str):
+            secret_key = secret_key.encode("utf-8")
+
+        team_password_key = self.password.encode("utf-8")
+        verification_secret = secret_key + team_password_key
+
+        invite_object = {
+            "id": self.id,
+            "v": hmac(str(self.id), secret=verification_secret),
+        }
+        code = serialize(data=invite_object, secret=secret_key)
+        return code
+
+    @classmethod
+    def load_invite_code(cls, code):
+        from flask import current_app
+        from CTFd.utils.security.signing import (
+            unserialize,
+            hmac,
+            BadTimeSignature,
+            BadSignature,
+        )
+        from CTFd.exceptions import TeamTokenExpiredException, TeamTokenInvalidException
+
+        secret_key = current_app.config["SECRET_KEY"]
+        if isinstance(secret_key, str):
+            secret_key = secret_key.encode("utf-8")
+
+        # Unserialize the invite code
+        try:
+            # Links expire after 1 day
+            invite_object = unserialize(code, max_age=86400)
+        except BadTimeSignature:
+            raise TeamTokenExpiredException
+        except BadSignature:
+            raise TeamTokenInvalidException
+
+        # Load the team by the ID in the invite
+        team_id = invite_object["id"]
+        team = cls.query.filter_by(id=team_id).first_or_404()
+
+        # Create the team specific secret
+        team_password_key = team.password.encode("utf-8")
+        verification_secret = secret_key + team_password_key
+
+        # Verify the team verficiation code
+        verified = hmac(str(team.id), secret=verification_secret) == invite_object["v"]
+        if verified is False:
+            raise TeamTokenInvalidException
+        return team
+
     def get_solves(self, admin=False):
         from CTFd.utils import get_config
 
         member_ids = [member.id for member in self.members]
 
         solves = Solves.query.filter(Solves.user_id.in_(member_ids)).order_by(
-            Solves.date.asc()
+            Solves.date.desc()
         )
 
         freeze = get_config("freeze")
@@ -543,7 +695,7 @@ class Teams(db.Model):
         member_ids = [member.id for member in self.members]
 
         fails = Fails.query.filter(Fails.user_id.in_(member_ids)).order_by(
-            Fails.date.asc()
+            Fails.date.desc()
         )
 
         freeze = get_config("freeze")
@@ -559,7 +711,7 @@ class Teams(db.Model):
         member_ids = [member.id for member in self.members]
 
         awards = Awards.query.filter(Awards.user_id.in_(member_ids)).order_by(
-            Awards.date.asc()
+            Awards.date.desc()
         )
 
         freeze = get_config("freeze")
@@ -785,10 +937,10 @@ class Comments(db.Model):
 
     @property
     def html(self):
-        from CTFd.utils.config.pages import build_html
+        from CTFd.utils.config.pages import build_markdown
         from CTFd.utils.helpers import markup
 
-        return markup(build_html(self.content, sanitize=True))
+        return markup(build_markdown(self.content, sanitize=True))
 
     __mapper_args__ = {"polymorphic_identity": "standard", "polymorphic_on": type}
 

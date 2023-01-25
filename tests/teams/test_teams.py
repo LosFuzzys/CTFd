@@ -36,7 +36,7 @@ def test_accessing_hidden_teams():
     app = create_ctfd(user_mode="teams")
     with app.app_context():
         register_user(app)
-        register_user(app, name="visible_user", email="visible_user@ctfd.io")
+        register_user(app, name="visible_user", email="visible_user@examplectf.com")
         with login_as_user(app, name="visible_user") as client:
             user = Users.query.filter_by(id=2).first()
             team = gen_team(app.db, name="visible_team", hidden=True)
@@ -69,6 +69,10 @@ def test_hidden_teams_visibility():
 
             r = client.get("/teams")
             response = r.get_data(as_text=True)
+            # Only search in body content
+            body_start = response.find("<body>")
+            body_end = response.find("</body>")
+            response = response[body_start:body_end]
             assert team_name not in response
 
             r = client.get("/api/v1/teams")
@@ -79,6 +83,10 @@ def test_hidden_teams_visibility():
 
             r = client.get("/scoreboard")
             response = r.get_data(as_text=True)
+            # Only search in body content
+            body_start = response.find("<body>")
+            body_end = response.find("</body>")
+            response = response[body_start:body_end]
             assert team_name not in response
 
             r = client.get("/api/v1/scoreboard")
@@ -113,40 +121,6 @@ def test_teams_get_user_mode():
         with login_as_user(app) as client:
             r = client.get("/teams")
             assert r.status_code == 404
-    destroy_ctfd(app)
-
-
-def test_teams_new_get():
-    """Can a user get /teams/new"""
-    app = create_ctfd(user_mode="teams")
-    with app.app_context():
-        register_user(app)
-        with login_as_user(app) as client:
-            r = client.get("/teams/new")
-            assert r.status_code == 200
-    destroy_ctfd(app)
-
-
-def test_teams_new_post():
-    """Can a user post /teams/new"""
-    app = create_ctfd(user_mode="teams")
-    with app.app_context():
-        gen_user(app.db, name="user")
-        with login_as_user(app) as client:
-            with client.session_transaction() as sess:
-                data = {
-                    "name": "team",
-                    "password": "password",
-                    "nonce": sess.get("nonce"),
-                }
-            r = client.post("/teams/new", data=data)
-            assert r.status_code == 302
-            r = client.post("/teams/new", data=data)
-            assert r.status_code == 200
-            incorrect_data = data
-            incorrect_data["name"] = ""
-            r = client.post("/teams/new", data=incorrect_data)
-            assert r.status_code == 200
     destroy_ctfd(app)
 
 
@@ -212,4 +186,66 @@ def test_team_size_limit():
             r = client.post("/teams/join", data=data)
             resp = r.get_data(as_text=True)
             assert len(Teams.query.filter_by(id=team_id).first().members) == 2
+    destroy_ctfd(app)
+
+
+def test_num_teams_limit():
+    """Only num_teams teams can be created"""
+    app = create_ctfd(user_mode="teams")
+    with app.app_context():
+        set_config("num_teams", 1)
+
+        # Create a team
+        gen_team(app.db, member_count=1)
+
+        register_user(app)
+        with login_as_user(app) as client:
+            r = client.get("/teams/new")
+            assert r.status_code == 403
+
+            # team should be blocked from creation
+            with client.session_transaction() as sess:
+                data = {
+                    "name": "team1",
+                    "password": "password",
+                    "nonce": sess.get("nonce"),
+                }
+            r = client.post("/teams/new", data=data)
+            resp = r.get_data(as_text=True)
+            assert Teams.query.count() == 1
+            assert "Reached the maximum number of teams" in resp
+
+            # Can the team be created after the num has been bumped
+            set_config("num_teams", 2)
+            r = client.post("/teams/new", data=data)
+            resp = r.get_data(as_text=True)
+            assert Teams.query.count() == 2
+    destroy_ctfd(app)
+
+
+def test_team_creation_disable():
+    app = create_ctfd(user_mode="teams")
+    with app.app_context():
+        register_user(app)
+        with login_as_user(app) as client:
+            # Team creation page should be available
+            r = client.get("/teams/new")
+            assert r.status_code == 200
+
+            # Disable team creation in config
+            set_config("team_creation", False)
+
+            # Can't access the public team creation page
+            r = client.get("/teams/new")
+            assert r.status_code == 403
+
+            # User should be blocked from creating teams as well
+            with client.session_transaction() as sess:
+                data = {
+                    "name": "team_name",
+                    "password": "password",
+                    "nonce": sess.get("nonce"),
+                }
+            r = client.post("/teams/new", data=data)
+            assert r.status_code == 403
     destroy_ctfd(app)

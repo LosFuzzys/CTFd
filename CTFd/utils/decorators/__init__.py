@@ -5,9 +5,9 @@ from flask import abort, jsonify, redirect, request, url_for
 from CTFd.cache import cache
 from CTFd.utils import config, get_config
 from CTFd.utils import user as current_user
+from CTFd.utils.config import is_teams_mode
 from CTFd.utils.dates import ctf_ended, ctf_started, ctftime, view_after_ctf
-from CTFd.utils.modes import TEAMS_MODE
-from CTFd.utils.user import authed, get_current_team, is_admin
+from CTFd.utils.user import authed, get_current_team, get_current_user, is_admin
 
 
 def during_ctf_time_only(f):
@@ -29,8 +29,11 @@ def during_ctf_time_only(f):
                     error = "{} has ended".format(config.ctf_name())
                     abort(403, description=error)
             if ctf_started() is False:
-                error = "{} has not started yet".format(config.ctf_name())
-                abort(403, description=error)
+                if is_teams_mode() and get_current_team() is None:
+                    return redirect(url_for("teams.private", next=request.full_path))
+                else:
+                    error = "{} has not started yet".format(config.ctf_name())
+                    abort(403, description=error)
 
     return during_ctf_time_only_wrapper
 
@@ -97,6 +100,29 @@ def authed_only(f):
     return authed_only_wrapper
 
 
+def registered_only(f):
+    """
+    Decorator that requires the user to have a registered account
+    :param f:
+    :return:
+    """
+
+    @functools.wraps(f)
+    def _registered_only(*args, **kwargs):
+        if authed():
+            return f(*args, **kwargs)
+        else:
+            if (
+                request.content_type == "application/json"
+                or request.accept_mimetypes.best == "text/event-stream"
+            ):
+                abort(403)
+            else:
+                return redirect(url_for("auth.register", next=request.full_path))
+
+    return _registered_only
+
+
 def admins_only(f):
     """
     Decorator that requires the user to be authenticated and an admin
@@ -120,14 +146,16 @@ def admins_only(f):
 def require_team(f):
     @functools.wraps(f)
     def require_team_wrapper(*args, **kwargs):
-        if get_config("user_mode") == TEAMS_MODE:
+        if is_teams_mode():
             team = get_current_team()
             if team is None:
                 if request.content_type == "application/json":
                     abort(403)
                 else:
                     return redirect(url_for("teams.private", next=request.full_path))
-        return f(*args, **kwargs)
+            return f(*args, **kwargs)
+        else:
+            abort(404)
 
     return require_team_wrapper
 
@@ -163,3 +191,39 @@ def ratelimit(method="POST", limit=50, interval=300, key_prefix="rl"):
         return ratelimit_function
 
     return ratelimit_decorator
+
+
+def require_complete_profile(f):
+    from CTFd.utils.helpers import info_for
+
+    @functools.wraps(f)
+    def _require_complete_profile(*args, **kwargs):
+        if authed():
+            if is_admin():
+                return f(*args, **kwargs)
+            else:
+                user = get_current_user()
+
+                if user.filled_all_required_fields is False:
+                    info_for(
+                        "views.settings",
+                        "Please fill out all required profile fields before continuing",
+                    )
+                    return redirect(url_for("views.settings"))
+
+                if is_teams_mode():
+                    team = get_current_team()
+
+                    if team and team.filled_all_required_fields is False:
+                        # This is an abort because it's difficult for us to flash information on the teams page
+                        return abort(
+                            403,
+                            description="Please fill in all required team profile fields",
+                        )
+
+                return f(*args, **kwargs)
+        else:
+            # Fallback to whatever behavior the route defaults to
+            return f(*args, **kwargs)
+
+    return _require_complete_profile

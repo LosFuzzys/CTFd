@@ -33,6 +33,7 @@ class TeamSchema(ma.ModelSchema):
         allow_none=False,
         validate=validate.Email("Emails must be a properly formatted email address"),
     )
+    password = field_for(Teams, "password", required=True, allow_none=False)
     website = field_for(
         Teams,
         "website",
@@ -185,7 +186,14 @@ class TeamSchema(ma.ModelSchema):
             current_team = get_current_team()
             current_user = get_current_user()
             if current_team.captain_id == current_user.id:
-                return
+                captain = Users.query.filter_by(id=captain_id).first()
+                if captain in current_team.members:
+                    return
+                else:
+                    raise ValidationError(
+                        "Only team members can be promoted to captain",
+                        field_names=["captain_id"],
+                    )
             else:
                 raise ValidationError(
                     "Only the captain can change team captain",
@@ -251,21 +259,24 @@ class TeamSchema(ma.ModelSchema):
                 # # Check that we have an existing field for this. May be unnecessary b/c the foriegn key should enforce
                 field = TeamFields.query.filter_by(id=field_id).first_or_404()
 
-                if field.required is True and value.strip() == "":
-                    raise ValidationError(
-                        f"Field '{field.name}' is required", field_names=["fields"]
-                    )
-
-                if field.editable is False:
-                    raise ValidationError(
-                        f"Field '{field.name}' cannot be editted",
-                        field_names=["fields"],
-                    )
-
                 # Get the existing field entry if one exists
                 entry = TeamFieldEntries.query.filter_by(
                     field_id=field.id, team_id=current_team.id
                 ).first()
+
+                if field.required is True:
+                    if isinstance(value, str):
+                        if value.strip() == "":
+                            raise ValidationError(
+                                f"Field '{field.name}' is required",
+                                field_names=["fields"],
+                            )
+
+                if field.editable is False and entry is not None:
+                    raise ValidationError(
+                        f"Field '{field.name}' cannot be editted",
+                        field_names=["fields"],
+                    )
 
                 if entry:
                     f["id"] = entry.id

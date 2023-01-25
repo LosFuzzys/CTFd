@@ -15,9 +15,15 @@ def test_accessing_hidden_users():
     """Hidden users should not give any data from /users or /api/v1/users"""
     app = create_ctfd()
     with app.app_context():
-        register_user(app, name="visible_user", email="visible_user@ctfd.io")  # ID 2
-        register_user(app, name="hidden_user", email="hidden_user@ctfd.io")  # ID 3
-        register_user(app, name="banned_user", email="banned_user@ctfd.io")  # ID 4
+        register_user(
+            app, name="visible_user", email="visible_user@examplectf.com"
+        )  # ID 2
+        register_user(
+            app, name="hidden_user", email="hidden_user@examplectf.com"
+        )  # ID 3
+        register_user(
+            app, name="banned_user", email="banned_user@examplectf.com"
+        )  # ID 4
         user = Users.query.filter_by(name="hidden_user").first()
         user.hidden = True
         app.db.session.commit()
@@ -55,6 +61,10 @@ def test_hidden_user_visibility():
 
             r = client.get("/users")
             response = r.get_data(as_text=True)
+            # Only search in body content
+            body_start = response.find("<body>")
+            body_end = response.find("</body>")
+            response = response[body_start:body_end]
             assert user_name not in response
 
             r = client.get("/api/v1/users")
@@ -65,6 +75,10 @@ def test_hidden_user_visibility():
 
             r = client.get("/scoreboard")
             response = r.get_data(as_text=True)
+            # Only search in body content
+            body_start = response.find("<body>")
+            body_end = response.find("</body>")
+            response = response[body_start:body_end]
             assert user_name not in response
 
             r = client.get("/api/v1/scoreboard")
@@ -79,6 +93,10 @@ def test_hidden_user_visibility():
 
             r = client.get("/users")
             response = r.get_data(as_text=True)
+            # Only search in body content
+            body_start = response.find("<body>")
+            body_end = response.find("</body>")
+            response = response[body_start:body_end]
             assert user_name in response
 
             r = client.get("/api/v1/users")

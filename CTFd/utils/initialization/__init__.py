@@ -10,7 +10,7 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from CTFd.cache import clear_user_recent_ips
 from CTFd.exceptions import UserNotFoundException, UserTokenExpiredException
 from CTFd.models import Tracking, db
-from CTFd.utils import config, get_config, markdown
+from CTFd.utils import config, get_config, import_in_progress, markdown
 from CTFd.utils.config import (
     can_send_mail,
     ctf_logo,
@@ -53,6 +53,7 @@ def init_template_filters(app):
 
 def init_template_globals(app):
     from CTFd.constants import JINJA_ENUMS
+    from CTFd.constants.assets import Assets
     from CTFd.constants.config import Configs
     from CTFd.constants.plugins import Plugins
     from CTFd.constants.sessions import Session
@@ -67,7 +68,7 @@ def init_template_globals(app):
         scores_visible,
     )
     from CTFd.utils.countries import get_countries, lookup_country_code
-    from CTFd.utils.countries.geoip import lookup_ip_address
+    from CTFd.utils.countries.geoip import lookup_ip_address, lookup_ip_address_city
 
     app.jinja_env.globals.update(config=config)
     app.jinja_env.globals.update(get_pages=get_pages)
@@ -89,6 +90,7 @@ def init_template_globals(app):
     app.jinja_env.globals.update(get_countries=get_countries)
     app.jinja_env.globals.update(lookup_country_code=lookup_country_code)
     app.jinja_env.globals.update(lookup_ip_address=lookup_ip_address)
+    app.jinja_env.globals.update(lookup_ip_address_city=lookup_ip_address_city)
     app.jinja_env.globals.update(accounts_visible=accounts_visible)
     app.jinja_env.globals.update(challenges_visible=challenges_visible)
     app.jinja_env.globals.update(registration_visible=registration_visible)
@@ -100,6 +102,7 @@ def init_template_globals(app):
     app.jinja_env.globals.update(get_current_user_attrs=get_current_user_attrs)
     app.jinja_env.globals.update(get_current_team_attrs=get_current_team_attrs)
     app.jinja_env.globals.update(get_ip=get_ip)
+    app.jinja_env.globals.update(Assets=Assets)
     app.jinja_env.globals.update(Configs=Configs)
     app.jinja_env.globals.update(Plugins=Plugins)
     app.jinja_env.globals.update(Session=Session)
@@ -189,11 +192,18 @@ def init_request_processors(app):
 
     @app.before_request
     def needs_setup():
+        if import_in_progress():
+            if request.endpoint == "admin.import_ctf":
+                return
+            else:
+                return "Import currently in progress", 403
         if is_setup() is False:
             if request.endpoint in (
                 "views.setup",
                 "views.integrations",
                 "views.themes",
+                "views.files",
+                "views.healthcheck",
             ):
                 return
             else:
@@ -203,6 +213,12 @@ def init_request_processors(app):
     def tracker():
         if request.endpoint == "views.themes":
             return
+
+        if import_in_progress():
+            if request.endpoint == "admin.import_ctf":
+                return
+            else:
+                return "Import currently in progress", 403
 
         if authed():
             user_ips = get_current_user_recent_ips()
@@ -266,7 +282,7 @@ def init_request_processors(app):
             except UserNotFoundException:
                 abort(401)
             except UserTokenExpiredException:
-                abort(401)
+                abort(401, description="Your access token has expired")
             except Exception:
                 abort(401)
             else:

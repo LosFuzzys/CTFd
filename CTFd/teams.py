@@ -1,17 +1,19 @@
-from flask import Blueprint, redirect, render_template, request, url_for
+from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from CTFd.cache import clear_team_session, clear_user_session
+from CTFd.exceptions import TeamTokenExpiredException, TeamTokenInvalidException
 from CTFd.models import TeamFieldEntries, TeamFields, Teams, db
 from CTFd.utils import config, get_config, validators
 from CTFd.utils.crypto import verify_password
-from CTFd.utils.decorators import authed_only, ratelimit
+from CTFd.utils.decorators import authed_only, ratelimit, registered_only
 from CTFd.utils.decorators.modes import require_team_mode
 from CTFd.utils.decorators.visibility import (
     check_account_visibility,
     check_score_visibility,
 )
 from CTFd.utils.helpers import get_errors, get_infos
-from CTFd.utils.user import get_current_user
+from CTFd.utils.humanize.words import pluralize
+from CTFd.utils.user import get_current_user, get_current_user_attrs
 
 teams = Blueprint("teams", __name__)
 
@@ -50,6 +52,74 @@ def listing():
     )
 
 
+@teams.route("/teams/invite", methods=["GET", "POST"])
+@registered_only
+@require_team_mode
+def invite():
+    infos = get_infos()
+    errors = get_errors()
+    code = request.args.get("code")
+
+    if code is None:
+        abort(404)
+
+    user = get_current_user_attrs()
+    if user.team_id:
+        errors.append("You are already in a team. You cannot join another.")
+
+    try:
+        team = Teams.load_invite_code(code)
+    except TeamTokenExpiredException:
+        abort(403, description="This invite URL has expired")
+    except TeamTokenInvalidException:
+        abort(403, description="This invite URL is invalid")
+
+    team_size_limit = get_config("team_size", default=0)
+
+    if request.method == "GET":
+        if team_size_limit:
+            infos.append(
+                "Teams are limited to {limit} member{plural}".format(
+                    limit=team_size_limit, plural=pluralize(number=team_size_limit)
+                )
+            )
+
+        return render_template(
+            "teams/invite.html", team=team, infos=infos, errors=errors
+        )
+
+    if request.method == "POST":
+        if errors:
+            return (
+                render_template(
+                    "teams/invite.html", team=team, infos=infos, errors=errors
+                ),
+                403,
+            )
+
+        if team_size_limit and len(team.members) >= team_size_limit:
+            errors.append(
+                "{name} has already reached the team size limit of {limit}".format(
+                    name=team.name, limit=team_size_limit
+                )
+            )
+            return (
+                render_template(
+                    "teams/invite.html", team=team, infos=infos, errors=errors
+                ),
+                403,
+            )
+
+        user = get_current_user()
+        user.team_id = team.id
+        db.session.commit()
+
+        clear_user_session(user_id=user.id)
+        clear_team_session(team_id=team.id)
+
+        return redirect(url_for("challenges.listing"))
+
+
 @teams.route("/teams/join", methods=["GET", "POST"])
 @authed_only
 @require_team_mode
@@ -57,6 +127,11 @@ def listing():
 def join():
     infos = get_infos()
     errors = get_errors()
+
+    user = get_current_user_attrs()
+    if user.team_id:
+        errors.append("You are already in a team. You cannot join another.")
+
     if request.method == "GET":
         team_size_limit = get_config("team_size", default=0)
         if team_size_limit:
@@ -73,6 +148,12 @@ def join():
         passphrase = request.form.get("password", "").strip()
 
         team = Teams.query.filter_by(name=teamname).first()
+
+        if errors:
+            return (
+                render_template("teams/join_team.html", infos=infos, errors=errors),
+                403,
+            )
 
         if team and verify_password(passphrase, team.password):
             team_size_limit = get_config("team_size", default=0)
@@ -109,6 +190,25 @@ def join():
 def new():
     infos = get_infos()
     errors = get_errors()
+
+    if bool(get_config("team_creation", default=True)) is False:
+        abort(
+            403,
+            description="Team creation is currently disabled. Please join an existing team.",
+        )
+
+    num_teams_limit = int(get_config("num_teams", default=0))
+    num_teams = Teams.query.filter_by(banned=False, hidden=False).count()
+    if num_teams_limit and num_teams >= num_teams_limit:
+        abort(
+            403,
+            description=f"Reached the maximum number of teams ({num_teams_limit}). Please join an existing team.",
+        )
+
+    user = get_current_user_attrs()
+    if user.team_id:
+        errors.append("You are already in a team. You cannot join another.")
+
     if request.method == "GET":
         team_size_limit = get_config("team_size", default=0)
         if team_size_limit:
@@ -118,12 +218,11 @@ def new():
                     limit=team_size_limit, plural=plural
                 )
             )
-
         return render_template("teams/new_team.html", infos=infos, errors=errors)
+
     elif request.method == "POST":
         teamname = request.form.get("name", "").strip()
         passphrase = request.form.get("password", "").strip()
-        errors = get_errors()
 
         website = request.form.get("website")
         affiliation = request.form.get("affiliation")
@@ -177,9 +276,16 @@ def new():
             errors.append("Please provide a shorter affiliation")
 
         if errors:
-            return render_template("teams/new_team.html", errors=errors)
+            return render_template("teams/new_team.html", errors=errors), 403
 
-        team = Teams(name=teamname, password=passphrase, captain_id=user.id)
+        # Hide the created team if the creator is an admin
+        hidden = False
+        if user.type == "admin":
+            hidden = True
+
+        team = Teams(
+            name=teamname, password=passphrase, captain_id=user.id, hidden=hidden
+        )
 
         if website:
             team.website = website

@@ -3,7 +3,8 @@ import time
 
 from flask import current_app as app
 
-from CTFd.utils import get_config
+from CTFd.constants.themes import DEFAULT_THEME
+from CTFd.utils import get_app_config, get_config
 from CTFd.utils.modes import TEAMS_MODE, USERS_MODE
 
 
@@ -33,6 +34,12 @@ def ctf_theme():
     return theme if theme else ""
 
 
+def ctf_theme_candidates():
+    yield ctf_theme()
+    if bool(get_app_config("THEME_FALLBACK")):
+        yield DEFAULT_THEME
+
+
 def is_setup():
     return bool(get_config("setup")) is True
 
@@ -53,6 +60,9 @@ def can_send_mail():
 
 
 def get_mail_provider():
+    mail_provider = app.config.get("MAIL_PROVIDER")
+    if mail_provider:
+        return mail_provider
     if get_config("mail_server") and get_config("mail_port"):
         return "smtp"
     if get_config("mailgun_api_key") and get_config("mailgun_base_url"):

@@ -4,7 +4,6 @@ from CTFd.admin import admin
 from CTFd.models import Pages
 from CTFd.schemas.pages import PageSchema
 from CTFd.utils import markdown
-from CTFd.utils.config.pages import build_html
 from CTFd.utils.decorators import admins_only
 
 
@@ -26,10 +25,13 @@ def pages_new():
 def pages_preview():
     # We only care about content.
     # Loading other attributes improperly will cause Marshmallow to incorrectly return a dict
-    data = {"content": request.form.get("content")}
+    data = {
+        "content": request.form.get("content"),
+        "format": request.form.get("format"),
+    }
     schema = PageSchema()
     page = schema.load(data)
-    return render_template("page.html", content=build_html(page.data.content))
+    return render_template("page.html", content=page.data.html)
 
 
 @admin.route("/admin/pages/<int:page_id>")
